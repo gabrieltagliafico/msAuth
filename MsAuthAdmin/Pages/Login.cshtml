@@ -1,0 +1,34 @@
+@page
+@model MsAuthAdmin.Pages.LoginModel
+@{
+    ViewData["Title"] = "Ingreso";
+}
+
+<div class="login-screen">
+    <div class="login-panel">
+        <p class="page-kicker">Acceso</p>
+        <h1>Ingreso</h1>
+        <p class="lede">Pedí el token con tu GUID y tu API key. La sesión queda en este sitio y el mantenimiento se hace contra el microservicio.</p>
+        <partial name="_Alerts" />
+        @if (!string.IsNullOrEmpty(Model.ApiHost))
+        {
+            <p class="small text-secondary">API conectada a @Model.ApiHost</p>
+        }
+        <form method="post" class="card" autocomplete="off">
+            <div class="mb-3">
+                <label class="form-label" asp-for="UidUser">GUID del usuario</label>
+                <input class="form-control" asp-for="UidUser" required placeholder="00000000-0000-0000-0000-000000000000" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label" asp-for="ApiKey">API key</label>
+                <input class="form-control" asp-for="ApiKey" type="password" required maxlength="256" autocomplete="current-password" />
+            </div>
+            <div class="mb-4">
+                <label class="form-label" asp-for="IdService">Id del servicio</label>
+                <input class="form-control" asp-for="IdService" type="number" min="1" required />
+                <div class="form-text">El JWT se emite contra este servicio. Tiene que existir y estar activo.</div>
+            </div>
+            <button class="btn btn-primary w-100" type="submit">Entrar</button>
+        </form>
+    </div>
+</div>

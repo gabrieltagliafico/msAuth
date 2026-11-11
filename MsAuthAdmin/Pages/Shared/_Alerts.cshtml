@@ -1,0 +1,12 @@
+@if (TempData["Notice"] is string notice)
+{
+    <div class="alert alert-success" role="status">@notice</div>
+}
+@if (ViewData["Error"] is string error)
+{
+    <div class="alert alert-danger" role="alert">@error</div>
+}
+else if (TempData["Error"] is string savedError)
+{
+    <div class="alert alert-danger" role="alert">@savedError</div>
+}

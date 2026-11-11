@@ -1,0 +1,55 @@
+@page
+@model MsAuthAdmin.Pages.Users.IndexModel
+@{
+    ViewData["Title"] = "Usuarios";
+}
+
+<h1 class="h3">Usuarios</h1>
+<partial name="_Alerts" />
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5">Nuevo usuario</h2>
+        <form method="post" asp-page-handler="Create" class="row g-3" autocomplete="off">
+            <div class="col-md-4">
+                <label class="form-label" for="name">Nombre</label>
+                <input class="form-control" id="name" name="name" maxlength="150" required />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="apiKey">API key</label>
+                <input class="form-control" id="apiKey" name="apiKey" type="password" maxlength="256" required autocomplete="new-password" />
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary" type="submit">Crear</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>GUID</th>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th>Alta</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var user in Model.Users)
+        {
+            <tr>
+                <td>@user.IdUser</td>
+                <td class="small">@user.UidUser</td>
+                <td>@user.Name</td>
+                <td><span class="status @(user.IsActive ? "status-on" : "status-off")">@(user.IsActive ? "Activo" : "Inactivo")</span></td>
+                <td>@user.DtCreated.ToString("yyyy-MM-dd HH:mm")</td>
+                <td><a asp-page="Edit" asp-route-id="@user.IdUser">Modificar</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

@@ -1,0 +1,125 @@
+@page
+@model MsAuthAdmin.Pages.Roles.IndexModel
+@{
+    ViewData["Title"] = "Roles";
+}
+
+<h1 class="h3">Roles</h1>
+<partial name="_Alerts" />
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5">Nuevo rol</h2>
+        <form method="post" asp-page-handler="Create" class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label" for="name">Nombre</label>
+                <input class="form-control" id="name" name="name" maxlength="100" required />
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary" type="submit">Crear</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="table-responsive mb-4">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var role in Model.Roles)
+        {
+            <tr>
+                <td>@role.IdRole</td>
+                <td colspan="3">
+                    <form method="post" asp-page-handler="Update" class="row g-2 align-items-center">
+                        <input type="hidden" name="idRole" value="@role.IdRole" />
+                        <input type="hidden" name="idUser" value="@Model.IdUser" />
+                        <div class="col-md-5">
+                            <input class="form-control" name="name" value="@role.Name" maxlength="100" required />
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" name="isActive">
+                                <option value="true" selected="@(role.IsActive ? "selected" : null)">Activo</option>
+                                <option value="false" selected="@(!role.IsActive ? "selected" : null)">Inactivo</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-outline-primary btn-sm" type="submit">Guardar</button>
+                        </div>
+                    </form>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+<h2 class="h4">Asignaciones</h2>
+<form method="get" class="row g-3 mb-3">
+    <div class="col-md-6">
+        <label class="form-label" for="idUser">Usuario</label>
+        <select class="form-select" id="idUser" name="idUser" onchange="this.form.submit()">
+            @foreach (var user in Model.Users)
+            {
+                <option value="@user.IdUser" selected="@(user.IdUser == Model.IdUser ? "selected" : null)">@user.IdUser - @user.Name</option>
+            }
+        </select>
+    </div>
+</form>
+
+@if (Model.IdUser > 0)
+{
+    <form method="post" asp-page-handler="Assign" class="row g-3 mb-3">
+        <input type="hidden" name="idUser" value="@Model.IdUser" />
+        <div class="col-md-6">
+            <label class="form-label" for="idRole">Rol</label>
+            <select class="form-select" id="idRole" name="idRole">
+                @foreach (var role in Model.Roles.Where(role => role.IsActive))
+                {
+                    <option value="@role.IdRole">@role.Name</option>
+                }
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-primary" type="submit">Asignar</button>
+        </div>
+    </form>
+}
+
+<div class="table-responsive">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Rol</th>
+                <th>Estado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var assignment in Model.Assignments)
+        {
+            <tr>
+                <td>@assignment.IdUserRole</td>
+                <td>@assignment.Name</td>
+                <td><span class="status @(assignment.IsActive ? "status-on" : "status-off")">@(assignment.IsActive ? "Activo" : "Inactivo")</span></td>
+                <td>
+                    <form method="post" asp-page-handler="UpdateAssignment">
+                        <input type="hidden" name="idUserRole" value="@assignment.IdUserRole" />
+                        <input type="hidden" name="idUser" value="@Model.IdUser" />
+                        <input type="hidden" name="isActive" value="@(!assignment.IsActive ? "true" : "false")" />
+                        <button class="btn btn-sm btn-outline-secondary" type="submit">@(assignment.IsActive ? "Desactivar" : "Activar")</button>
+                    </form>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

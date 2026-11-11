@@ -1,0 +1,37 @@
+﻿@page
+@model MsAuthAdmin.Pages.IndexModel
+@{
+    ViewData["Title"] = "Inicio";
+}
+
+<p class="page-kicker">Panel</p>
+<h1>Mantenimiento</h1>
+<p class="lede">Sesión de @Model.UserId. El token vence @Model.ExpiresText.</p>
+
+<div class="tile-grid">
+    <a class="tile" asp-page="/Users/Index">
+        <span>01</span>
+        <h2>Usuarios</h2>
+        <p>Alta, nombre, estado y renovación de la API key.</p>
+    </a>
+    <a class="tile" asp-page="/Services/Index">
+        <span>02</span>
+        <h2>Servicios</h2>
+        <p>Microservicios contra los que se emite el token.</p>
+    </a>
+    <a class="tile" asp-page="/Endpoints/Index">
+        <span>03</span>
+        <h2>Endpoints</h2>
+        <p>Método y ruta que después se autorizan por usuario.</p>
+    </a>
+    <a class="tile" asp-page="/Permissions/Index">
+        <span>04</span>
+        <h2>Permisos</h2>
+        <p>Qué endpoint de un servicio puede ejecutar cada usuario.</p>
+    </a>
+    <a class="tile" asp-page="/Roles/Index">
+        <span>05</span>
+        <h2>Roles</h2>
+        <p>Catálogo y asignaciones. Administrator abre este panel.</p>
+    </a>
+</div>

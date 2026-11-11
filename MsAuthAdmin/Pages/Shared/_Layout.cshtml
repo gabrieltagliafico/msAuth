@@ -1,0 +1,61 @@
+﻿<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - MsAuth</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/MsAuthAdmin.styles.css" asp-append-version="true" />
+</head>
+<body>
+    @{
+        var signedIn = MsAuthAdmin.Services.AdminSession.IsActive(Context.Session);
+        var path = Context.Request.Path.Value ?? string.Empty;
+        string Active(string prefix) => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? "active" : string.Empty;
+    }
+    <div class="app-shell@(signedIn ? "" : " app-shell-guest")">
+        @if (signedIn)
+        {
+            <aside class="side">
+                <a class="brand" asp-page="/Index">
+                    <span class="brand-mark">M</span>
+                    <span>
+                        <span class="brand-name">MsAuth</span>
+                        <span class="brand-sub">Mantenimiento</span>
+                    </span>
+                </a>
+                <nav class="side-nav">
+                    <a class="@Active("/Users")" asp-page="/Users/Index">Usuarios</a>
+                    <a class="@Active("/Services")" asp-page="/Services/Index">Servicios</a>
+                    <a class="@Active("/Endpoints")" asp-page="/Endpoints/Index">Endpoints</a>
+                    <a class="@Active("/Permissions")" asp-page="/Permissions/Index">Permisos</a>
+                    <a class="@Active("/Roles")" asp-page="/Roles/Index">Roles</a>
+                </nav>
+                <div class="side-foot">
+                    <p class="session-id">@MsAuthAdmin.Services.AdminSession.UserId(Context.Session)</p>
+                    <form method="post" asp-page="/Logout">
+                        <button class="btn btn-outline-light btn-sm" type="submit">Salir</button>
+                    </form>
+                </div>
+            </aside>
+        }
+        <div class="app-main">
+            @if (!signedIn)
+            {
+                <div class="guest-bar">
+                    <a class="brand" asp-page="/Login">
+                        <span class="brand-mark">M</span>
+                        <span class="brand-name">MsAuth</span>
+                    </a>
+                </div>
+            }
+            <main class="app-content" role="main">
+                @RenderBody()
+            </main>
+        </div>
+    </div>
+    <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

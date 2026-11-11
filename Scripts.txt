@@ -1,0 +1,969 @@
+/*
+    MsAuth - base de permisos y tokens.
+
+    Ejecutar una vez en SQL Server Management Studio, sobre la base
+    que va a usar la conexión BNCAuth.
+
+    Nombres en inglés.
+    Identificadores: id + nombre de tabla, IDENTITY(1, 1).
+    Fechas: prefijo dt. Booleanos: prefijo is.
+*/
+
+IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = N'Auth')
+    EXEC(N'CREATE SCHEMA [Auth]');
+GO
+
+CREATE TABLE [Auth].[User]
+(
+    idUser      INT              IDENTITY(1, 1) NOT NULL,
+    uidUser     UNIQUEIDENTIFIER NOT NULL,
+    name        NVARCHAR(150)    NOT NULL,
+    apiKeyHash  VARBINARY(32)    NOT NULL,
+    dtCreated   DATETIME2(0)     NOT NULL CONSTRAINT DF_User_dtCreated DEFAULT (SYSUTCDATETIME()),
+    dtModified  DATETIME2(0)     NULL,
+    isActive    BIT              NOT NULL CONSTRAINT DF_User_isActive DEFAULT (1),
+    CONSTRAINT PK_User PRIMARY KEY CLUSTERED (idUser),
+    CONSTRAINT UQ_User_uidUser UNIQUE (uidUser)
+);
+GO
+
+CREATE TABLE [Auth].[Service]
+(
+    idService   INT            IDENTITY(1, 1) NOT NULL,
+    name        NVARCHAR(150)  NOT NULL,
+    dtCreated   DATETIME2(0)   NOT NULL CONSTRAINT DF_Service_dtCreated DEFAULT (SYSUTCDATETIME()),
+    dtModified  DATETIME2(0)   NULL,
+    isActive    BIT            NOT NULL CONSTRAINT DF_Service_isActive DEFAULT (1),
+    CONSTRAINT PK_Service PRIMARY KEY CLUSTERED (idService)
+);
+GO
+
+CREATE TABLE [Auth].[Endpoint]
+(
+    idEndpoint  INT            IDENTITY(1, 1) NOT NULL,
+    idService   INT            NOT NULL,
+    name        NVARCHAR(150)  NOT NULL,
+    httpMethod  VARCHAR(10)    NOT NULL,
+    route       NVARCHAR(300)  NOT NULL,
+    dtCreated   DATETIME2(0)   NOT NULL CONSTRAINT DF_Endpoint_dtCreated DEFAULT (SYSUTCDATETIME()),
+    dtModified  DATETIME2(0)   NULL,
+    isActive    BIT            NOT NULL CONSTRAINT DF_Endpoint_isActive DEFAULT (1),
+    CONSTRAINT PK_Endpoint PRIMARY KEY CLUSTERED (idEndpoint),
+    CONSTRAINT FK_Endpoint_Service FOREIGN KEY (idService) REFERENCES [Auth].[Service] (idService),
+    CONSTRAINT UQ_Endpoint_Service_Method_Route UNIQUE (idService, httpMethod, route)
+);
+GO
+
+CREATE TABLE [Auth].[Permission]
+(
+    idPermission INT           IDENTITY(1, 1) NOT NULL,
+    idUser       INT           NOT NULL,
+    idService    INT           NOT NULL,
+    idEndpoint   INT           NOT NULL,
+    dtCreated    DATETIME2(0)  NOT NULL CONSTRAINT DF_Permission_dtCreated DEFAULT (SYSUTCDATETIME()),
+    dtModified   DATETIME2(0)  NULL,
+    isActive     BIT           NOT NULL CONSTRAINT DF_Permission_isActive DEFAULT (1),
+    CONSTRAINT PK_Permission PRIMARY KEY CLUSTERED (idPermission),
+    CONSTRAINT FK_Permission_User FOREIGN KEY (idUser) REFERENCES [Auth].[User] (idUser),
+    CONSTRAINT FK_Permission_Service FOREIGN KEY (idService) REFERENCES [Auth].[Service] (idService),
+    CONSTRAINT FK_Permission_Endpoint FOREIGN KEY (idEndpoint) REFERENCES [Auth].[Endpoint] (idEndpoint),
+    CONSTRAINT UQ_Permission_User_Endpoint UNIQUE (idUser, idEndpoint)
+);
+GO
+
+CREATE TABLE [Auth].[AccessToken]
+(
+    idAccessToken INT            IDENTITY(1, 1) NOT NULL,
+    idUser        INT            NOT NULL,
+    idService     INT            NOT NULL,
+    token         NVARCHAR(MAX)  NOT NULL,
+    dtCreated     DATETIME2(0)   NOT NULL CONSTRAINT DF_AccessToken_dtCreated DEFAULT (SYSUTCDATETIME()),
+    dtExpires     DATETIME2(0)   NOT NULL,
+    isRevoked     BIT            NOT NULL CONSTRAINT DF_AccessToken_isRevoked DEFAULT (0),
+    CONSTRAINT PK_AccessToken PRIMARY KEY CLUSTERED (idAccessToken),
+    CONSTRAINT FK_AccessToken_User FOREIGN KEY (idUser) REFERENCES [Auth].[User] (idUser),
+    CONSTRAINT FK_AccessToken_Service FOREIGN KEY (idService) REFERENCES [Auth].[Service] (idService)
+);
+GO
+
+CREATE INDEX IX_Permission_User_Service
+    ON [Auth].[Permission] (idUser, idService)
+    INCLUDE (idEndpoint, isActive);
+GO
+
+CREATE INDEX IX_AccessToken_User_Service_Expires
+    ON [Auth].[AccessToken] (idUser, idService, dtExpires);
+GO
+
+/*
+    Ejemplo para el primer administrador. No se ejecuta solo.
+    El hash usa NVARCHAR(256), el mismo tipo del parámetro @ApiKey.
+    Después de correr la sección de roles, el id del rol Administrator
+    y el idService del servicio insertado sirven para emitir el primer JWT.
+
+    INSERT INTO [Auth].[Service] (name) VALUES (N'Auth');
+
+    INSERT INTO [Auth].[User] (uidUser, name, apiKeyHash)
+    VALUES
+    (
+        '00000000-0000-0000-0000-000000000001',
+        N'Example User',
+        HASHBYTES('SHA2_256', CONVERT(NVARCHAR(256), N'replace-with-api-key'))
+    );
+
+    INSERT INTO [Auth].[UserRole] (idUser, idRole)
+    SELECT u.idUser, r.idRole
+    FROM [Auth].[User] AS u
+    CROSS JOIN [Auth].[Role] AS r
+    WHERE u.uidUser = '00000000-0000-0000-0000-000000000001'
+      AND r.name = N'Administrator';
+*/
+
+/* Stored procedures */
+
+SET ANSI_NULLS ON;
+GO
+SET QUOTED_IDENTIFIER ON;
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_UserPermissions_Get]
+    @UidUser   UNIQUEIDENTIFIER,
+    @ApiKey    NVARCHAR(256),
+    @idService INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @idUser INT;
+    DECLARE @apiKeyHash VARBINARY(32) = HASHBYTES('SHA2_256', @ApiKey);
+
+    SELECT @idUser = idUser
+    FROM [Auth].[User]
+    WHERE uidUser = @UidUser
+      AND apiKeyHash = @apiKeyHash
+      AND isActive = 1;
+
+    IF @idUser IS NULL
+    BEGIN
+        SELECT
+            CAST(1 AS INT)              AS ResultCode,
+            CAST(NULL AS INT)           AS IdUser,
+            CAST(NULL AS UNIQUEIDENTIFIER) AS UidUser,
+            CAST(NULL AS INT)           AS IdService,
+            CAST(NULL AS INT)           AS IdEndpoint,
+            CAST(NULL AS VARCHAR(10))   AS HttpMethod,
+            CAST(NULL AS NVARCHAR(300)) AS Route,
+            CAST(NULL AS NVARCHAR(150)) AS Name;
+        RETURN;
+    END
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [Auth].[Service]
+        WHERE idService = @idService
+          AND isActive = 1
+    )
+    BEGIN
+        SELECT
+            CAST(2 AS INT)              AS ResultCode,
+            CAST(NULL AS INT)           AS IdUser,
+            CAST(NULL AS UNIQUEIDENTIFIER) AS UidUser,
+            CAST(NULL AS INT)           AS IdService,
+            CAST(NULL AS INT)           AS IdEndpoint,
+            CAST(NULL AS VARCHAR(10))   AS HttpMethod,
+            CAST(NULL AS NVARCHAR(300)) AS Route,
+            CAST(NULL AS NVARCHAR(150)) AS Name;
+        RETURN;
+    END
+
+    IF NOT EXISTS
+    (
+        SELECT 1
+        FROM [Auth].[Permission] AS p
+        INNER JOIN [Auth].[Endpoint] AS e
+            ON e.idEndpoint = p.idEndpoint
+        WHERE p.idUser = @idUser
+          AND p.idService = @idService
+          AND p.isActive = 1
+          AND e.idService = @idService
+          AND e.isActive = 1
+    )
+    BEGIN
+        SELECT
+            CAST(3 AS INT)              AS ResultCode,
+            @idUser                     AS IdUser,
+            @UidUser                    AS UidUser,
+            @idService                  AS IdService,
+            CAST(NULL AS INT)           AS IdEndpoint,
+            CAST(NULL AS VARCHAR(10))   AS HttpMethod,
+            CAST(NULL AS NVARCHAR(300)) AS Route,
+            CAST(NULL AS NVARCHAR(150)) AS Name;
+        RETURN;
+    END
+
+    SELECT
+        CAST(0 AS INT) AS ResultCode,
+        u.idUser       AS IdUser,
+        u.uidUser      AS UidUser,
+        p.idService    AS IdService,
+        e.idEndpoint   AS IdEndpoint,
+        e.httpMethod   AS HttpMethod,
+        e.route        AS Route,
+        e.name         AS Name
+    FROM [Auth].[Permission] AS p
+    INNER JOIN [Auth].[User] AS u
+        ON u.idUser = p.idUser
+    INNER JOIN [Auth].[Endpoint] AS e
+        ON e.idEndpoint = p.idEndpoint
+    WHERE p.idUser = @idUser
+      AND p.idService = @idService
+      AND p.isActive = 1
+      AND e.idService = @idService
+      AND e.isActive = 1;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_AccessToken_Insert]
+    @idUser    INT,
+    @idService INT,
+    @token     NVARCHAR(MAX),
+    @dtExpires DATETIME2(0)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @inserted TABLE
+    (
+        idAccessToken INT          NOT NULL,
+        dtCreated     DATETIME2(0) NOT NULL,
+        dtExpires     DATETIME2(0) NOT NULL
+    );
+
+    INSERT INTO [Auth].[AccessToken] (idUser, idService, token, dtExpires)
+    OUTPUT
+        inserted.idAccessToken,
+        inserted.dtCreated,
+        inserted.dtExpires
+    INTO @inserted (idAccessToken, dtCreated, dtExpires)
+    VALUES (@idUser, @idService, @token, @dtExpires);
+
+    SELECT
+        idAccessToken AS IdAccessToken,
+        dtCreated     AS DtCreated,
+        dtExpires     AS DtExpires
+    FROM @inserted;
+END
+GO
+
+/*
+    Mantenimiento.
+    Si el script de tablas ya se ejecutó, corré desde esta marca.
+    ResultCode: 0 correcto, 1 no existe, 2 duplicado, 3 solicitud inválida, 4 rol protegido.
+*/
+
+IF OBJECT_ID(N'[Auth].[Role]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [Auth].[Role]
+    (
+        idRole      INT            IDENTITY(1, 1) NOT NULL,
+        name        NVARCHAR(100)  NOT NULL,
+        dtCreated   DATETIME2(0)   NOT NULL CONSTRAINT DF_Role_dtCreated DEFAULT (SYSUTCDATETIME()),
+        dtModified  DATETIME2(0)   NULL,
+        isActive    BIT            NOT NULL CONSTRAINT DF_Role_isActive DEFAULT (1),
+        CONSTRAINT PK_Role PRIMARY KEY CLUSTERED (idRole),
+        CONSTRAINT UQ_Role_name UNIQUE (name)
+    );
+END
+GO
+
+IF OBJECT_ID(N'[Auth].[UserRole]', N'U') IS NULL
+BEGIN
+    CREATE TABLE [Auth].[UserRole]
+    (
+        idUserRole  INT           IDENTITY(1, 1) NOT NULL,
+        idUser      INT           NOT NULL,
+        idRole      INT           NOT NULL,
+        dtCreated   DATETIME2(0)  NOT NULL CONSTRAINT DF_UserRole_dtCreated DEFAULT (SYSUTCDATETIME()),
+        dtModified  DATETIME2(0)  NULL,
+        isActive    BIT           NOT NULL CONSTRAINT DF_UserRole_isActive DEFAULT (1),
+        CONSTRAINT PK_UserRole PRIMARY KEY CLUSTERED (idUserRole),
+        CONSTRAINT FK_UserRole_User FOREIGN KEY (idUser) REFERENCES [Auth].[User] (idUser),
+        CONSTRAINT FK_UserRole_Role FOREIGN KEY (idRole) REFERENCES [Auth].[Role] (idRole),
+        CONSTRAINT UQ_UserRole_User_Role UNIQUE (idUser, idRole)
+    );
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM [Auth].[Role] WHERE name = N'Administrator')
+    INSERT INTO [Auth].[Role] (name) VALUES (N'Administrator');
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_UserRole_GetByUser]
+    @idUser INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT r.name AS Name
+    FROM [Auth].[UserRole] AS ur
+    INNER JOIN [Auth].[Role] AS r
+        ON r.idRole = ur.idRole
+    WHERE ur.idUser = @idUser
+      AND ur.isActive = 1
+      AND r.isActive = 1;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_User_Insert]
+    @name   NVARCHAR(150),
+    @apiKey NVARCHAR(256)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0 OR @apiKey IS NULL OR LEN(@apiKey) = 0
+    BEGIN
+        SELECT
+            CAST(3 AS INT) AS ResultCode,
+            CAST(NULL AS INT) AS IdUser,
+            CAST(NULL AS UNIQUEIDENTIFIER) AS UidUser,
+            CAST(NULL AS NVARCHAR(150)) AS Name,
+            CAST(NULL AS DATETIME2(0)) AS DtCreated,
+            CAST(NULL AS DATETIME2(0)) AS DtModified,
+            CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @inserted TABLE
+    (
+        idUser     INT              NOT NULL,
+        uidUser    UNIQUEIDENTIFIER NOT NULL,
+        name       NVARCHAR(150)    NOT NULL,
+        dtCreated  DATETIME2(0)     NOT NULL,
+        dtModified DATETIME2(0)     NULL,
+        isActive   BIT              NOT NULL
+    );
+
+    INSERT INTO [Auth].[User] (uidUser, name, apiKeyHash)
+    OUTPUT inserted.idUser, inserted.uidUser, inserted.name, inserted.dtCreated, inserted.dtModified, inserted.isActive
+    INTO @inserted (idUser, uidUser, name, dtCreated, dtModified, isActive)
+    VALUES (NEWID(), LTRIM(RTRIM(@name)), HASHBYTES('SHA2_256', @apiKey));
+
+    SELECT
+        CAST(0 AS INT) AS ResultCode,
+        idUser AS IdUser,
+        uidUser AS UidUser,
+        name AS Name,
+        dtCreated AS DtCreated,
+        dtModified AS DtModified,
+        isActive AS IsActive
+    FROM @inserted;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_User_Update]
+    @idUser   INT,
+    @name     NVARCHAR(150),
+    @isActive BIT,
+    @apiKey   NVARCHAR(256) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[User] WHERE idUser = @idUser)
+    BEGIN
+        SELECT
+            CAST(1 AS INT) AS ResultCode,
+            CAST(NULL AS INT) AS IdUser,
+            CAST(NULL AS UNIQUEIDENTIFIER) AS UidUser,
+            CAST(NULL AS NVARCHAR(150)) AS Name,
+            CAST(NULL AS DATETIME2(0)) AS DtCreated,
+            CAST(NULL AS DATETIME2(0)) AS DtModified,
+            CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+    BEGIN
+        SELECT
+            CAST(3 AS INT) AS ResultCode,
+            CAST(NULL AS INT) AS IdUser,
+            CAST(NULL AS UNIQUEIDENTIFIER) AS UidUser,
+            CAST(NULL AS NVARCHAR(150)) AS Name,
+            CAST(NULL AS DATETIME2(0)) AS DtCreated,
+            CAST(NULL AS DATETIME2(0)) AS DtModified,
+            CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    UPDATE [Auth].[User]
+    SET name = LTRIM(RTRIM(@name)),
+        isActive = @isActive,
+        dtModified = SYSUTCDATETIME(),
+        apiKeyHash = CASE
+            WHEN @apiKey IS NULL OR LEN(@apiKey) = 0 THEN apiKeyHash
+            ELSE HASHBYTES('SHA2_256', @apiKey)
+        END
+    WHERE idUser = @idUser;
+
+    SELECT
+        CAST(0 AS INT) AS ResultCode,
+        idUser AS IdUser,
+        uidUser AS UidUser,
+        name AS Name,
+        dtCreated AS DtCreated,
+        dtModified AS DtModified,
+        isActive AS IsActive
+    FROM [Auth].[User]
+    WHERE idUser = @idUser;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_User_List]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT
+        CAST(0 AS INT) AS ResultCode,
+        idUser AS IdUser,
+        uidUser AS UidUser,
+        name AS Name,
+        dtCreated AS DtCreated,
+        dtModified AS DtModified,
+        isActive AS IsActive
+    FROM [Auth].[User]
+    ORDER BY idUser;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Service_Insert]
+    @name NVARCHAR(150)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdService, CAST(NULL AS NVARCHAR(150)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [Auth].[Service] WHERE name = LTRIM(RTRIM(@name)))
+    BEGIN
+        SELECT CAST(2 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdService, CAST(NULL AS NVARCHAR(150)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @inserted TABLE
+    (
+        idService  INT           NOT NULL,
+        name       NVARCHAR(150) NOT NULL,
+        dtCreated  DATETIME2(0)  NOT NULL,
+        dtModified DATETIME2(0)  NULL,
+        isActive   BIT           NOT NULL
+    );
+
+    INSERT INTO [Auth].[Service] (name)
+    OUTPUT inserted.idService, inserted.name, inserted.dtCreated, inserted.dtModified, inserted.isActive
+    INTO @inserted (idService, name, dtCreated, dtModified, isActive)
+    VALUES (LTRIM(RTRIM(@name)));
+
+    SELECT CAST(0 AS INT) AS ResultCode, idService AS IdService, name AS Name,
+           dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM @inserted;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Service_Update]
+    @idService INT,
+    @name      NVARCHAR(150),
+    @isActive  BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[Service] WHERE idService = @idService)
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdService, CAST(NULL AS NVARCHAR(150)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdService, CAST(NULL AS NVARCHAR(150)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [Auth].[Service] WHERE name = LTRIM(RTRIM(@name)) AND idService <> @idService)
+    BEGIN
+        SELECT CAST(2 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdService, CAST(NULL AS NVARCHAR(150)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    UPDATE [Auth].[Service]
+    SET name = LTRIM(RTRIM(@name)),
+        isActive = @isActive,
+        dtModified = SYSUTCDATETIME()
+    WHERE idService = @idService;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idService AS IdService, name AS Name,
+           dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Service]
+    WHERE idService = @idService;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Service_List]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idService AS IdService, name AS Name,
+           dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Service]
+    ORDER BY idService;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Endpoint_Insert]
+    @idService  INT,
+    @name       NVARCHAR(150),
+    @httpMethod VARCHAR(10),
+    @route      NVARCHAR(300)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[Service] WHERE idService = @idService)
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
+               CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+       OR @httpMethod IS NULL OR LEN(LTRIM(RTRIM(@httpMethod))) = 0
+       OR @route IS NULL OR LEN(LTRIM(RTRIM(@route))) = 0
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
+               CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [Auth].[Endpoint]
+        WHERE idService = @idService
+          AND httpMethod = @httpMethod
+          AND route = LTRIM(RTRIM(@route))
+    )
+    BEGIN
+        SELECT CAST(2 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
+               CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @inserted TABLE
+    (
+        idEndpoint  INT           NOT NULL,
+        idService   INT           NOT NULL,
+        name        NVARCHAR(150) NOT NULL,
+        httpMethod  VARCHAR(10)   NOT NULL,
+        route       NVARCHAR(300) NOT NULL,
+        dtCreated   DATETIME2(0)  NOT NULL,
+        dtModified  DATETIME2(0)  NULL,
+        isActive    BIT           NOT NULL
+    );
+
+    INSERT INTO [Auth].[Endpoint] (idService, name, httpMethod, route)
+    OUTPUT inserted.idEndpoint, inserted.idService, inserted.name, inserted.httpMethod, inserted.route,
+           inserted.dtCreated, inserted.dtModified, inserted.isActive
+    INTO @inserted (idEndpoint, idService, name, httpMethod, route, dtCreated, dtModified, isActive)
+    VALUES (@idService, LTRIM(RTRIM(@name)), @httpMethod, LTRIM(RTRIM(@route)));
+
+    SELECT CAST(0 AS INT) AS ResultCode, idEndpoint AS IdEndpoint, idService AS IdService, name AS Name,
+           httpMethod AS HttpMethod, route AS Route, dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM @inserted;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Endpoint_Update]
+    @idEndpoint INT,
+    @name       NVARCHAR(150),
+    @httpMethod VARCHAR(10),
+    @route      NVARCHAR(300),
+    @isActive   BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @idService INT;
+    SELECT @idService = idService FROM [Auth].[Endpoint] WHERE idEndpoint = @idEndpoint;
+
+    IF @idService IS NULL
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
+               CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+       OR @httpMethod IS NULL OR LEN(LTRIM(RTRIM(@httpMethod))) = 0
+       OR @route IS NULL OR LEN(LTRIM(RTRIM(@route))) = 0
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
+               CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF EXISTS
+    (
+        SELECT 1
+        FROM [Auth].[Endpoint]
+        WHERE idService = @idService
+          AND httpMethod = @httpMethod
+          AND route = LTRIM(RTRIM(@route))
+          AND idEndpoint <> @idEndpoint
+    )
+    BEGIN
+        SELECT CAST(2 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
+               CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    UPDATE [Auth].[Endpoint]
+    SET name = LTRIM(RTRIM(@name)),
+        httpMethod = @httpMethod,
+        route = LTRIM(RTRIM(@route)),
+        isActive = @isActive,
+        dtModified = SYSUTCDATETIME()
+    WHERE idEndpoint = @idEndpoint;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idEndpoint AS IdEndpoint, idService AS IdService, name AS Name,
+           httpMethod AS HttpMethod, route AS Route, dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Endpoint]
+    WHERE idEndpoint = @idEndpoint;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Endpoint_ListByService]
+    @idService INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idEndpoint AS IdEndpoint, idService AS IdService, name AS Name,
+           httpMethod AS HttpMethod, route AS Route, dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Endpoint]
+    WHERE idService = @idService
+    ORDER BY idEndpoint;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Permission_Insert]
+    @idUser     INT,
+    @idService  INT,
+    @idEndpoint INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[User] WHERE idUser = @idUser)
+       OR NOT EXISTS (SELECT 1 FROM [Auth].[Service] WHERE idService = @idService)
+       OR NOT EXISTS (SELECT 1 FROM [Auth].[Endpoint] WHERE idEndpoint = @idEndpoint)
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdPermission, CAST(NULL AS INT) AS IdUser,
+               CAST(NULL AS INT) AS IdService, CAST(NULL AS INT) AS IdEndpoint,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[Endpoint] WHERE idEndpoint = @idEndpoint AND idService = @idService)
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdPermission, CAST(NULL AS INT) AS IdUser,
+               CAST(NULL AS INT) AS IdService, CAST(NULL AS INT) AS IdEndpoint,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @idPermission INT;
+    SELECT @idPermission = idPermission
+    FROM [Auth].[Permission]
+    WHERE idUser = @idUser AND idEndpoint = @idEndpoint;
+
+    IF @idPermission IS NULL
+    BEGIN
+        INSERT INTO [Auth].[Permission] (idUser, idService, idEndpoint)
+        VALUES (@idUser, @idService, @idEndpoint);
+
+        SET @idPermission = CONVERT(INT, SCOPE_IDENTITY());
+    END
+    ELSE
+    BEGIN
+        UPDATE [Auth].[Permission]
+        SET isActive = 1,
+            idService = @idService,
+            dtModified = SYSUTCDATETIME()
+        WHERE idPermission = @idPermission;
+    END
+
+    SELECT CAST(0 AS INT) AS ResultCode, idPermission AS IdPermission, idUser AS IdUser, idService AS IdService,
+           idEndpoint AS IdEndpoint, dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Permission]
+    WHERE idPermission = @idPermission;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Permission_Update]
+    @idPermission INT,
+    @isActive     BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[Permission] WHERE idPermission = @idPermission)
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdPermission, CAST(NULL AS INT) AS IdUser,
+               CAST(NULL AS INT) AS IdService, CAST(NULL AS INT) AS IdEndpoint,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    UPDATE [Auth].[Permission]
+    SET isActive = @isActive,
+        dtModified = SYSUTCDATETIME()
+    WHERE idPermission = @idPermission;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idPermission AS IdPermission, idUser AS IdUser, idService AS IdService,
+           idEndpoint AS IdEndpoint, dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Permission]
+    WHERE idPermission = @idPermission;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Permission_ListByUser]
+    @idUser INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idPermission AS IdPermission, idUser AS IdUser, idService AS IdService,
+           idEndpoint AS IdEndpoint, dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Permission]
+    WHERE idUser = @idUser
+    ORDER BY idPermission;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Role_Insert]
+    @name NVARCHAR(100)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [Auth].[Role] WHERE name = LTRIM(RTRIM(@name)))
+    BEGIN
+        SELECT CAST(2 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @inserted TABLE
+    (
+        idRole     INT           NOT NULL,
+        name       NVARCHAR(100) NOT NULL,
+        dtCreated  DATETIME2(0)  NOT NULL,
+        dtModified DATETIME2(0)  NULL,
+        isActive   BIT           NOT NULL
+    );
+
+    INSERT INTO [Auth].[Role] (name)
+    OUTPUT inserted.idRole, inserted.name, inserted.dtCreated, inserted.dtModified, inserted.isActive
+    INTO @inserted (idRole, name, dtCreated, dtModified, isActive)
+    VALUES (LTRIM(RTRIM(@name)));
+
+    SELECT CAST(0 AS INT) AS ResultCode, idRole AS IdRole, name AS Name,
+           dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM @inserted;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Role_Update]
+    @idRole   INT,
+    @name     NVARCHAR(100),
+    @isActive BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @currentName NVARCHAR(100);
+    SELECT @currentName = name FROM [Auth].[Role] WHERE idRole = @idRole;
+
+    IF @currentName IS NULL
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF @currentName = N'Administrator' AND (LTRIM(RTRIM(@name)) <> N'Administrator' OR @isActive = 0)
+    BEGIN
+        SELECT CAST(4 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF EXISTS (SELECT 1 FROM [Auth].[Role] WHERE name = LTRIM(RTRIM(@name)) AND idRole <> @idRole)
+    BEGIN
+        SELECT CAST(2 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    UPDATE [Auth].[Role]
+    SET name = LTRIM(RTRIM(@name)),
+        isActive = @isActive,
+        dtModified = SYSUTCDATETIME()
+    WHERE idRole = @idRole;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idRole AS IdRole, name AS Name,
+           dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Role]
+    WHERE idRole = @idRole;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_Role_List]
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT CAST(0 AS INT) AS ResultCode, idRole AS IdRole, name AS Name,
+           dtCreated AS DtCreated, dtModified AS DtModified, isActive AS IsActive
+    FROM [Auth].[Role]
+    ORDER BY idRole;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_UserRole_Insert]
+    @idUser INT,
+    @idRole INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[User] WHERE idUser = @idUser)
+       OR NOT EXISTS (SELECT 1 FROM [Auth].[Role] WHERE idRole = @idRole)
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdUserRole, CAST(NULL AS INT) AS IdUser,
+               CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[Role] WHERE idRole = @idRole AND isActive = 1)
+    BEGIN
+        SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdUserRole, CAST(NULL AS INT) AS IdUser,
+               CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @idUserRole INT;
+    SELECT @idUserRole = idUserRole
+    FROM [Auth].[UserRole]
+    WHERE idUser = @idUser AND idRole = @idRole;
+
+    IF @idUserRole IS NULL
+    BEGIN
+        INSERT INTO [Auth].[UserRole] (idUser, idRole)
+        VALUES (@idUser, @idRole);
+
+        SET @idUserRole = CONVERT(INT, SCOPE_IDENTITY());
+    END
+    ELSE
+    BEGIN
+        UPDATE [Auth].[UserRole]
+        SET isActive = 1,
+            dtModified = SYSUTCDATETIME()
+        WHERE idUserRole = @idUserRole;
+    END
+
+    SELECT CAST(0 AS INT) AS ResultCode, ur.idUserRole AS IdUserRole, ur.idUser AS IdUser, ur.idRole AS IdRole,
+           r.name AS Name, ur.dtCreated AS DtCreated, ur.dtModified AS DtModified, ur.isActive AS IsActive
+    FROM [Auth].[UserRole] AS ur
+    INNER JOIN [Auth].[Role] AS r ON r.idRole = ur.idRole
+    WHERE ur.idUserRole = @idUserRole;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_UserRole_Update]
+    @idUserRole INT,
+    @isActive   BIT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[UserRole] WHERE idUserRole = @idUserRole)
+    BEGIN
+        SELECT CAST(1 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdUserRole, CAST(NULL AS INT) AS IdUser,
+               CAST(NULL AS INT) AS IdRole, CAST(NULL AS NVARCHAR(100)) AS Name,
+               CAST(NULL AS DATETIME2(0)) AS DtCreated, CAST(NULL AS DATETIME2(0)) AS DtModified, CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    UPDATE [Auth].[UserRole]
+    SET isActive = @isActive,
+        dtModified = SYSUTCDATETIME()
+    WHERE idUserRole = @idUserRole;
+
+    SELECT CAST(0 AS INT) AS ResultCode, ur.idUserRole AS IdUserRole, ur.idUser AS IdUser, ur.idRole AS IdRole,
+           r.name AS Name, ur.dtCreated AS DtCreated, ur.dtModified AS DtModified, ur.isActive AS IsActive
+    FROM [Auth].[UserRole] AS ur
+    INNER JOIN [Auth].[Role] AS r ON r.idRole = ur.idRole
+    WHERE ur.idUserRole = @idUserRole;
+END
+GO
+
+CREATE OR ALTER PROCEDURE [Auth].[p_API_UserRole_ListByUser]
+    @idUser INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT CAST(0 AS INT) AS ResultCode, ur.idUserRole AS IdUserRole, ur.idUser AS IdUser, ur.idRole AS IdRole,
+           r.name AS Name, ur.dtCreated AS DtCreated, ur.dtModified AS DtModified, ur.isActive AS IsActive
+    FROM [Auth].[UserRole] AS ur
+    INNER JOIN [Auth].[Role] AS r ON r.idRole = ur.idRole
+    WHERE ur.idUser = @idUser
+    ORDER BY ur.idUserRole;
+END
+GO

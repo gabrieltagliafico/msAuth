@@ -1,0 +1,81 @@
+@page
+@model MsAuthAdmin.Pages.Endpoints.IndexModel
+@{
+    ViewData["Title"] = "Endpoints";
+}
+
+<h1 class="h3">Endpoints</h1>
+<partial name="_Alerts" />
+
+<form method="get" class="row g-3 mb-4">
+    <div class="col-md-6">
+        <label class="form-label" for="idService">Servicio</label>
+        <select class="form-select" id="idService" name="idService" onchange="this.form.submit()">
+            @foreach (var service in Model.Services)
+            {
+                <option value="@service.IdService" selected="@(service.IdService == Model.IdService ? "selected" : null)">@service.IdService - @service.Name</option>
+            }
+        </select>
+    </div>
+</form>
+
+@if (Model.IdService > 0)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5">Nuevo endpoint</h2>
+            <form method="post" asp-page-handler="Create" class="row g-3">
+                <input type="hidden" name="idService" value="@Model.IdService" />
+                <div class="col-md-3">
+                    <label class="form-label" for="name">Nombre</label>
+                    <input class="form-control" id="name" name="name" maxlength="150" required />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label" for="httpMethod">Método</label>
+                    <select class="form-select" id="httpMethod" name="httpMethod">
+                        <option>GET</option>
+                        <option>POST</option>
+                        <option>PUT</option>
+                        <option>PATCH</option>
+                        <option>DELETE</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="route">Ruta</label>
+                    <input class="form-control" id="route" name="route" maxlength="300" placeholder="/api/recurso/accion" required />
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-primary" type="submit">Crear</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+<div class="table-responsive">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Nombre</th>
+                <th>Método</th>
+                <th>Ruta</th>
+                <th>Estado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var endpoint in Model.Endpoints)
+        {
+            <tr>
+                <td>@endpoint.IdEndpoint</td>
+                <td>@endpoint.Name</td>
+                <td>@endpoint.HttpMethod</td>
+                <td>@endpoint.Route</td>
+                <td><span class="status @(endpoint.IsActive ? "status-on" : "status-off")">@(endpoint.IsActive ? "Activo" : "Inactivo")</span></td>
+                <td><a asp-page="Edit" asp-route-id="@endpoint.IdEndpoint" asp-route-idService="@Model.IdService">Modificar</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

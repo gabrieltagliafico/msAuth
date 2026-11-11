@@ -1,0 +1,44 @@
+@page "{id:int}"
+@model MsAuthAdmin.Pages.Endpoints.EditModel
+@{
+    ViewData["Title"] = "Modificar endpoint";
+}
+
+<h1 class="h3">Modificar endpoint</h1>
+<partial name="_Alerts" />
+
+<form method="post" class="card card-body">
+    <input type="hidden" name="idService" value="@Model.IdService" />
+    <div class="mb-3">
+        <label class="form-label">Id</label>
+        <input class="form-control" value="@Model.IdEndpoint" readonly />
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="name">Nombre</label>
+        <input class="form-control" id="name" name="name" value="@Model.Name" maxlength="150" required />
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="httpMethod">Método</label>
+        <select class="form-select" id="httpMethod" name="httpMethod">
+            @foreach (var method in new[] { "GET", "POST", "PUT", "PATCH", "DELETE" })
+            {
+                <option value="@method" selected="@(method == Model.HttpMethod ? "selected" : null)">@method</option>
+            }
+        </select>
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="route">Ruta</label>
+        <input class="form-control" id="route" name="route" value="@Model.Route" maxlength="300" required />
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="isActive">Estado</label>
+        <select class="form-select" id="isActive" name="isActive">
+            <option value="true" selected="@(Model.IsActive ? "selected" : null)">Activo</option>
+            <option value="false" selected="@(!Model.IsActive ? "selected" : null)">Inactivo</option>
+        </select>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Guardar</button>
+        <a class="btn btn-outline-secondary" asp-page="Index" asp-route-idService="@Model.IdService">Volver</a>
+    </div>
+</form>

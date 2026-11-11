@@ -1,0 +1,89 @@
+@page
+@model MsAuthAdmin.Pages.Permissions.IndexModel
+@{
+    ViewData["Title"] = "Permisos";
+}
+
+<h1 class="h3">Permisos</h1>
+<p class="text-secondary">Autoriza a un usuario a ejecutar un endpoint de un servicio.</p>
+<partial name="_Alerts" />
+
+<form method="get" class="row g-3 mb-4">
+    <div class="col-md-4">
+        <label class="form-label" for="idUser">Usuario</label>
+        <select class="form-select" id="idUser" name="idUser" onchange="this.form.submit()">
+            @foreach (var user in Model.Users)
+            {
+                <option value="@user.IdUser" selected="@(user.IdUser == Model.IdUser ? "selected" : null)">@user.IdUser - @user.Name</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-4">
+        <label class="form-label" for="idService">Servicio del endpoint</label>
+        <select class="form-select" id="idService" name="idService" onchange="this.form.submit()">
+            @foreach (var service in Model.Services)
+            {
+                <option value="@service.IdService" selected="@(service.IdService == Model.IdService ? "selected" : null)">@service.IdService - @service.Name</option>
+            }
+        </select>
+    </div>
+</form>
+
+@if (Model.IdUser > 0 && Model.IdService > 0)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h5">Autorizar endpoint</h2>
+            <form method="post" asp-page-handler="Create" class="row g-3">
+                <input type="hidden" name="idUser" value="@Model.IdUser" />
+                <input type="hidden" name="idService" value="@Model.IdService" />
+                <div class="col-md-8">
+                    <label class="form-label" for="idEndpoint">Endpoint</label>
+                    <select class="form-select" id="idEndpoint" name="idEndpoint" required>
+                        @foreach (var endpoint in Model.Endpoints)
+                        {
+                            <option value="@endpoint.IdEndpoint">@endpoint.HttpMethod @endpoint.Route (@endpoint.Name)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-primary" type="submit" disabled="@(Model.Endpoints.Count == 0 ? "disabled" : null)">Autorizar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+<div class="table-responsive">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Servicio</th>
+                <th>Endpoint</th>
+                <th>Estado</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var permission in Model.Permissions)
+        {
+            <tr>
+                <td>@permission.IdPermission</td>
+                <td>@permission.IdService</td>
+                <td>@permission.IdEndpoint</td>
+                <td><span class="status @(permission.IsActive ? "status-on" : "status-off")">@(permission.IsActive ? "Activo" : "Inactivo")</span></td>
+                <td>
+                    <form method="post" asp-page-handler="Update" class="d-flex gap-2">
+                        <input type="hidden" name="idPermission" value="@permission.IdPermission" />
+                        <input type="hidden" name="idUser" value="@Model.IdUser" />
+                        <input type="hidden" name="idService" value="@Model.IdService" />
+                        <input type="hidden" name="isActive" value="@(!permission.IsActive ? "true" : "false")" />
+                        <button class="btn btn-sm btn-outline-secondary" type="submit">@(permission.IsActive ? "Desactivar" : "Activar")</button>
+                    </form>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

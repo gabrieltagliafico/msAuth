@@ -1,0 +1,49 @@
+@page
+@model MsAuthAdmin.Pages.Services.IndexModel
+@{
+    ViewData["Title"] = "Servicios";
+}
+
+<h1 class="h3">Servicios</h1>
+<partial name="_Alerts" />
+
+<div class="card mb-4">
+    <div class="card-body">
+        <h2 class="h5">Nuevo servicio</h2>
+        <form method="post" asp-page-handler="Create" class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label" for="name">Nombre</label>
+                <input class="form-control" id="name" name="name" maxlength="150" required />
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary" type="submit">Crear</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-sm align-middle">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>Nombre</th>
+                <th>Estado</th>
+                <th>Alta</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var service in Model.Services)
+        {
+            <tr>
+                <td>@service.IdService</td>
+                <td>@service.Name</td>
+                <td><span class="status @(service.IsActive ? "status-on" : "status-off")">@(service.IsActive ? "Activo" : "Inactivo")</span></td>
+                <td>@service.DtCreated.ToString("yyyy-MM-dd HH:mm")</td>
+                <td><a asp-page="Edit" asp-route-id="@service.IdService">Modificar</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>

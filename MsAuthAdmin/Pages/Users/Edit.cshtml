@@ -1,0 +1,39 @@
+@page "{id:int}"
+@model MsAuthAdmin.Pages.Users.EditModel
+@{
+    ViewData["Title"] = "Modificar usuario";
+}
+
+<h1 class="h3">Modificar usuario</h1>
+<partial name="_Alerts" />
+
+<form method="post" class="card card-body" autocomplete="off">
+    <div class="mb-3">
+        <label class="form-label">Id</label>
+        <input class="form-control" value="@Model.IdUser" readonly />
+    </div>
+    <div class="mb-3">
+        <label class="form-label">GUID</label>
+        <input class="form-control" value="@Model.UidUser" readonly />
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="name">Nombre</label>
+        <input class="form-control" id="name" name="name" value="@Model.Name" maxlength="150" required />
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="isActive">Estado</label>
+        <select class="form-select" id="isActive" name="isActive">
+            <option value="true" selected="@(Model.IsActive ? "selected" : null)">Activo</option>
+            <option value="false" selected="@(!Model.IsActive ? "selected" : null)">Inactivo</option>
+        </select>
+    </div>
+    <div class="mb-3">
+        <label class="form-label" for="apiKey">Nueva API key</label>
+        <input class="form-control" id="apiKey" name="apiKey" type="password" maxlength="256" autocomplete="new-password" />
+        <div class="form-text">Dejala vacía para conservar la actual. No se muestra la clave guardada.</div>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Guardar</button>
+        <a class="btn btn-outline-secondary" asp-page="Index">Volver</a>
+    </div>
+</form>
