@@ -13,12 +13,12 @@ namespace MsAuth.Models
         public string Name { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "El método HTTP es obligatorio.")]
-        [RegularExpression("^(?i)(GET|POST|PUT|PATCH|DELETE)$", ErrorMessage = "El método HTTP no es válido.")]
-        public string HttpMethod { get; set; } = string.Empty;
+        [RegularExpression("^(?i)(\\*|GET|POST|PUT|PATCH|DELETE)$", ErrorMessage = "El método HTTP no es válido.")]
+        public string HttpMethod { get; set; } = "*";
 
         [Required(ErrorMessage = "La ruta es obligatoria.")]
         [StringLength(300, ErrorMessage = "La ruta no puede superar 300 caracteres.")]
-        [RegularExpression(@"^\s*/.*$", ErrorMessage = "La ruta debe comenzar con /.")]
+        [RegularExpression(@"^\s*(/\S.*|[A-Za-z][A-Za-z0-9]*(\/[A-Za-z][A-Za-z0-9]*)?)\s*$", ErrorMessage = "La ruta debe ser un controlador (CreditCards), un controlador y acción (Cards/ListAvailableCards) o una ruta que empiece con /.")]
         public string Route { get; set; } = string.Empty;
     }
 
@@ -33,12 +33,12 @@ namespace MsAuth.Models
         public string Name { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "El método HTTP es obligatorio.")]
-        [RegularExpression("^(?i)(GET|POST|PUT|PATCH|DELETE)$", ErrorMessage = "El método HTTP no es válido.")]
-        public string HttpMethod { get; set; } = string.Empty;
+        [RegularExpression("^(?i)(\\*|GET|POST|PUT|PATCH|DELETE)$", ErrorMessage = "El método HTTP no es válido.")]
+        public string HttpMethod { get; set; } = "*";
 
         [Required(ErrorMessage = "La ruta es obligatoria.")]
         [StringLength(300, ErrorMessage = "La ruta no puede superar 300 caracteres.")]
-        [RegularExpression(@"^\s*/.*$", ErrorMessage = "La ruta debe comenzar con /.")]
+        [RegularExpression(@"^\s*(/\S.*|[A-Za-z][A-Za-z0-9]*(\/[A-Za-z][A-Za-z0-9]*)?)\s*$", ErrorMessage = "La ruta debe ser un controlador (CreditCards), un controlador y acción (Cards/ListAvailableCards) o una ruta que empiece con /.")]
         public string Route { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Debe indicar si el endpoint está activo.")]

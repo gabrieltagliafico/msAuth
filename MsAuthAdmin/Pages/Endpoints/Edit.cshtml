@@ -20,15 +20,16 @@
     <div class="mb-3">
         <label class="form-label" for="httpMethod">Método</label>
         <select class="form-select" id="httpMethod" name="httpMethod">
-            @foreach (var method in new[] { "GET", "POST", "PUT", "PATCH", "DELETE" })
+            @foreach (var method in new[] { "*", "GET", "POST", "PUT", "PATCH", "DELETE" })
             {
-                <option value="@method" selected="@(method == Model.HttpMethod ? "selected" : null)">@method</option>
+                <option value="@method" selected="@(method == Model.HttpMethod ? "selected" : null)">@(method == "*" ? "Todos" : method)</option>
             }
         </select>
     </div>
     <div class="mb-3">
-        <label class="form-label" for="route">Ruta</label>
-        <input class="form-control" id="route" name="route" value="@Model.Route" maxlength="300" required />
+        <label class="form-label" for="route">Controlador o acción</label>
+        <input class="form-control" id="route" name="route" value="@Model.Route" maxlength="300" placeholder="CreditCards o Cards/ListAvailableCards" required />
+        <div class="form-text">Todos autoriza cualquier verbo. CreditCards cubre el controlador entero. Cards/ListAvailableCards cubre solo esa acción.</div>
     </div>
     <div class="mb-3">
         <label class="form-label" for="isActive">Estado</label>

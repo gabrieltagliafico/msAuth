@@ -30,4 +30,10 @@ namespace MsAuth.Models
         [StringLength(256, ErrorMessage = "La API key no puede superar 256 caracteres.")]
         public string? ApiKey { get; set; }
     }
+
+    public class UserDeleteRequest
+    {
+        [Range(1, int.MaxValue, ErrorMessage = "El identificador del usuario debe ser un entero positivo.")]
+        public int IdUser { get; set; }
+    }
 }

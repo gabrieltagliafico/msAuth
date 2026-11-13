@@ -20,6 +20,8 @@ namespace BNC.Microservices.Auth.Repositories
 
         Task<IEnumerable<UserDto>> ListUsersAsync();
 
+        Task<IEnumerable<UserDto>> DeleteUserAsync(int idUser);
+
         Task<IEnumerable<ServiceDto>> InsertServiceAsync(string name);
 
         Task<IEnumerable<ServiceDto>> UpdateServiceAsync(int idService, string name, bool isActive);
@@ -111,6 +113,13 @@ namespace BNC.Microservices.Auth.Repositories
         public Task<IEnumerable<UserDto>> ListUsersAsync()
         {
             return QueryAsync<UserDto>("ListUsers", new DynamicParameters(), "Error de base de datos al listar usuarios");
+        }
+
+        public Task<IEnumerable<UserDto>> DeleteUserAsync(int idUser)
+        {
+            var parameters = new DynamicParameters();
+            parameters.Add("@idUser", idUser, DbType.Int32);
+            return QueryAsync<UserDto>("DeleteUser", parameters, "Error de base de datos al eliminar el usuario");
         }
 
         public Task<IEnumerable<ServiceDto>> InsertServiceAsync(string name)

@@ -42,7 +42,7 @@
                     <select class="form-select" id="idEndpoint" name="idEndpoint" required>
                         @foreach (var endpoint in Model.Endpoints)
                         {
-                            <option value="@endpoint.IdEndpoint">@endpoint.HttpMethod @endpoint.Route (@endpoint.Name)</option>
+                            <option value="@endpoint.IdEndpoint">@(endpoint.HttpMethod == "*" ? "Todos" : endpoint.HttpMethod) @endpoint.Route (@endpoint.Name)</option>
                         }
                     </select>
                 </div>

@@ -41,6 +41,31 @@ public class IndexModel : AdminPageModel
         return RedirectToPage();
     }
 
+    public async Task<IActionResult> OnPostDeleteAsync(int idUser)
+    {
+        if (idUser <= 0)
+        {
+            ShowError("El identificador del usuario debe ser un entero positivo.");
+            return await LoadAsync() ?? Page();
+        }
+
+        var call = await Api.PostAsync<UserRow>("api/Users/Delete", new { idUser }, Token);
+        var denied = RedirectIfUnauthorized(call.Status);
+        if (denied is not null)
+        {
+            return denied;
+        }
+
+        if (!call.Ok)
+        {
+            ShowError(call.Error);
+            return await LoadAsync() ?? Page();
+        }
+
+        TempData["Notice"] = "Usuario eliminado, junto con sus permisos.";
+        return RedirectToPage();
+    }
+
     private async Task<IActionResult?> LoadAsync()
     {
         var call = await Api.GetAsync<List<UserRow>>("api/Users/List", Token);

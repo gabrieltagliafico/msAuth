@@ -48,6 +48,22 @@ namespace BNC.Microservices.MsAuth.Controllers
         }
 
         /// <summary>
+        /// Elimina un usuario junto con sus permisos, roles asignados y tokens emitidos. Requiere el rol Administrator.
+        /// </summary>
+        [HttpPost("Delete")]
+        [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+        public Task<IActionResult> Delete([FromBody] UserDeleteRequest model)
+        {
+            return ExecuteAsync(
+                () => _authService.DeleteUserAsync(AuthorizationHeader, model.IdUser),
+                "AuthService.DeleteUserAsync");
+        }
+
+        /// <summary>
         /// Lista los usuarios sin exponer la API key. Requiere el rol Administrator.
         /// </summary>
         [HttpGet("List")]

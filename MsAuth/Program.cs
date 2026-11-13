@@ -4,6 +4,7 @@ using BNC.Microservices.Auth.Services;
 using BNC.Microservices.Infrastructure;
 using SecretsHandler;
 using System.Globalization;
+using Scalar.AspNetCore;
 
 namespace BNC.Microservices.MsAuth
 {
@@ -36,6 +37,17 @@ namespace BNC.Microservices.MsAuth
 
             #region Base de Datos (DLL Infraestructura)
             builder.Services.AddDatabaseLayer(builder.Configuration);
+
+            var dbDictionary = new Dictionary<string, object>();
+            var connectionStrings = builder.Configuration.GetSection("ConnectionStrings").GetChildren();
+
+            foreach (var conn in connectionStrings)
+            {
+                dbDictionary.Add(conn.Key, conn.Value);
+            }
+
+            builder.Services.AddSingleton(dbDictionary);
+            builder.Services.AddScoped<IDBLayerDap, DBLayerDap>();
             #endregion
 
             // 2. Inyección de Dependencias del Negocio
@@ -60,6 +72,7 @@ namespace BNC.Microservices.MsAuth
             if (app.Environment.IsDevelopment())
             {
                 app.MapOpenApi();
+                app.MapScalarApiReference();
             }
 
             app.UseHttpsRedirection();

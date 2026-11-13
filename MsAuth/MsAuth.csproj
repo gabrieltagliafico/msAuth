@@ -10,15 +10,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="BNC.DBLayerDap" Version="1.0.0" />
+    <PackageReference Include="BNC.SecretsHandler" Version="1.0.0" />
+    <PackageReference Include="BNC.Security" Version="1.0.0" />
+    <PackageReference Include="BNC.Utilities" Version="1.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.21.0" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\DBLayerDap\DBLayerDap\DBLayerDap.csproj" />
-    <ProjectReference Include="..\..\Security\Security\Security.csproj" />
-    <ProjectReference Include="..\..\Utilities\Utilities.csproj" />
   </ItemGroup>
 
   <ItemGroup>

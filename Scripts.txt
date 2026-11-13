@@ -438,6 +438,67 @@ BEGIN
 END
 GO
 
+CREATE OR ALTER PROCEDURE [Auth].[p_API_User_Delete]
+    @idUser INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM [Auth].[User] WHERE idUser = @idUser)
+    BEGIN
+        SELECT
+            CAST(1 AS INT) AS ResultCode,
+            CAST(NULL AS INT) AS IdUser,
+            CAST(NULL AS UNIQUEIDENTIFIER) AS UidUser,
+            CAST(NULL AS NVARCHAR(150)) AS Name,
+            CAST(NULL AS DATETIME2(0)) AS DtCreated,
+            CAST(NULL AS DATETIME2(0)) AS DtModified,
+            CAST(NULL AS BIT) AS IsActive;
+        RETURN;
+    END
+
+    DECLARE @deleted TABLE
+    (
+        idUser     INT              NOT NULL,
+        uidUser    UNIQUEIDENTIFIER NOT NULL,
+        name       NVARCHAR(150)    NOT NULL,
+        dtCreated  DATETIME2(0)     NOT NULL,
+        dtModified DATETIME2(0)     NULL,
+        isActive   BIT              NOT NULL
+    );
+
+    BEGIN TRANSACTION;
+
+    DELETE FROM [Auth].[Permission] WHERE idUser = @idUser;
+    DELETE FROM [Auth].[UserRole] WHERE idUser = @idUser;
+    DELETE FROM [Auth].[AccessToken] WHERE idUser = @idUser;
+
+    DELETE FROM [Auth].[User]
+    OUTPUT
+        deleted.idUser,
+        deleted.uidUser,
+        deleted.name,
+        deleted.dtCreated,
+        deleted.dtModified,
+        deleted.isActive
+    INTO @deleted (idUser, uidUser, name, dtCreated, dtModified, isActive)
+    WHERE idUser = @idUser;
+
+    COMMIT TRANSACTION;
+
+    SELECT
+        CAST(0 AS INT) AS ResultCode,
+        idUser AS IdUser,
+        uidUser AS UidUser,
+        name AS Name,
+        dtCreated AS DtCreated,
+        dtModified AS DtModified,
+        isActive AS IsActive
+    FROM @deleted;
+END
+GO
+
 CREATE OR ALTER PROCEDURE [Auth].[p_API_Service_Insert]
     @name NVARCHAR(150)
 AS
@@ -552,6 +613,7 @@ BEGIN
     IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
        OR @httpMethod IS NULL OR LEN(LTRIM(RTRIM(@httpMethod))) = 0
        OR @route IS NULL OR LEN(LTRIM(RTRIM(@route))) = 0
+       OR @httpMethod NOT IN ('*', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE')
     BEGIN
         SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
                CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,
@@ -622,6 +684,7 @@ BEGIN
     IF @name IS NULL OR LEN(LTRIM(RTRIM(@name))) = 0
        OR @httpMethod IS NULL OR LEN(LTRIM(RTRIM(@httpMethod))) = 0
        OR @route IS NULL OR LEN(LTRIM(RTRIM(@route))) = 0
+       OR @httpMethod NOT IN ('*', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE')
     BEGIN
         SELECT CAST(3 AS INT) AS ResultCode, CAST(NULL AS INT) AS IdEndpoint, CAST(NULL AS INT) AS IdService,
                CAST(NULL AS NVARCHAR(150)) AS Name, CAST(NULL AS VARCHAR(10)) AS HttpMethod, CAST(NULL AS NVARCHAR(300)) AS Route,

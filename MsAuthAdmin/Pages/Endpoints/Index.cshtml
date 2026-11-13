@@ -33,6 +33,7 @@
                 <div class="col-md-2">
                     <label class="form-label" for="httpMethod">Método</label>
                     <select class="form-select" id="httpMethod" name="httpMethod">
+                        <option value="*" selected>Todos</option>
                         <option>GET</option>
                         <option>POST</option>
                         <option>PUT</option>
@@ -41,11 +42,14 @@
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label" for="route">Ruta</label>
-                    <input class="form-control" id="route" name="route" maxlength="300" placeholder="/api/recurso/accion" required />
+                    <label class="form-label" for="route">Controlador o acción</label>
+                    <input class="form-control" id="route" name="route" maxlength="300" placeholder="CreditCards o Cards/ListAvailableCards" required />
                 </div>
                 <div class="col-md-2 d-flex align-items-end">
                     <button class="btn btn-primary" type="submit">Crear</button>
+                </div>
+                <div class="col-12">
+                    <p class="form-text mb-0">Todos autoriza cualquier verbo. CreditCards cubre el controlador entero. Cards/ListAvailableCards cubre solo esa acción. También se puede guardar una ruta que empiece con /.</p>
                 </div>
             </form>
         </div>
@@ -70,7 +74,7 @@
             <tr>
                 <td>@endpoint.IdEndpoint</td>
                 <td>@endpoint.Name</td>
-                <td>@endpoint.HttpMethod</td>
+                <td>@(endpoint.HttpMethod == "*" ? "Todos" : endpoint.HttpMethod)</td>
                 <td>@endpoint.Route</td>
                 <td><span class="status @(endpoint.IsActive ? "status-on" : "status-off")">@(endpoint.IsActive ? "Activo" : "Inactivo")</span></td>
                 <td><a asp-page="Edit" asp-route-id="@endpoint.IdEndpoint" asp-route-idService="@Model.IdService">Modificar</a></td>

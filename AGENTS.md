@@ -1,233 +1,151 @@
-# Lineamientos de microservicio BNC
+# MsAuth — autenticación y panel
 
-Guía para armar un microservicio ASP.NET Core con la misma forma que `MsCreditCards`: un host HTTP delgado, negocio en servicios, acceso a datos solo en repositorios, y SQL fuera del código (nombres de stored procedures en configuración).
+Este repo tiene los dos proyectos juntos. Las copias separadas están en `C:\Users\gabot\source\repos\authentication` (solo el API) y `C:\Users\gabot\source\repos\authenticationmanagement` (solo el panel). Si hay que alinear código, la fuente funcional es la de esos dos repos.
 
-Reemplazá `{Dominio}` (ejemplo: `Cards`), `{Recurso}` (ejemplo: `Movements`) y `{Ms}` (ejemplo: `MsCreditCards`) por los del servicio nuevo. El proyecto host se llama `Ms{Dominio}`. El namespace de negocio es `BNC.Microservices.{Dominio}`.
+`MsAuth` emite el JWT y mantiene usuarios, servicios, endpoints, permisos y roles. `MsAuthAdmin` es el sitio Razor que llama a ese API. La API key no se guarda en claro: SQL la persiste con `HASHBYTES('SHA2_256', ...)`. El mantenimiento exige un Bearer con el claim `role` = `Administrator`. `POST api/Permissions/IssueToken` no pide ese rol: se autentica con `uidUser` + `apiKey` + `idService`.
 
 ## Stack
 
-- ASP.NET Core Web API, `net10.0`, `<Nullable>enable</Nullable>`, `<ImplicitUsings>enable</ImplicitUsings>`.
-- Un solo proyecto web por microservicio. La solución es un `.slnx` con ese proyecto.
-- Contenedor Linux (`DockerDefaultTargetOS`), imagen `mcr.microsoft.com/dotnet/aspnet:10.0`, puertos `8080` (HTTP) y `8081` (HTTPS).
-- Cultura del proceso: `CultureInfo.InvariantCulture` en cultura y UI, al inicio de `Program.Main`.
-- No hay Entity Framework ni SQL embebido. Las lecturas pasan por Dapper y la librería compartida `IDBLayerDap`.
+- `net10.0`, nullable e implicit usings. Dos soluciones: `MsAuth.slnx` y `MsAuthAdmin.slnx`.
+- API: cultura invariante, sin Entity Framework y sin SQL en C#. Dapper vía `IDBLayerDap.QueryListAsync`.
+- Paquetes BNC en `Packages/` (`nuget.config` apunta ahí y a nuget.org): `BNC.DBLayerDap`, `BNC.Security`, `BNC.Utilities`, `BNC.SecretsHandler` 1.0.0. Además hay un `Reference` a `..\..\Libraries\SecretsHandler\SecretsHandler_Net10.0.dll`.
+- JWT con `System.IdentityModel.Tokens.Jwt`. OpenAPI y Scalar solo en Development.
+- Contenedor Linux del API, `mcr.microsoft.com/dotnet/aspnet:10.0`, puertos `8080` y `8081`. `DockerfileContext` es `..\..`.
+- Panel: Razor Pages, Bootstrap en tema oscuro, sin base propia y sin paquetes NuGet extra.
 
-## Proyectos de infraestructura (hermanos, no viven en este repo)
-
-El `.csproj` referencia librerías al mismo nivel que la carpeta del microservicio. El `Dockerfile` copia ese árbol (`CreditCards`, `DBLayerDap`, `Utilities`) porque `DockerfileContext` apunta dos niveles arriba del proyecto.
-
-| Referencia | Rol en este servicio |
-|---|---|
-| `DBLayerDap` (`BNC.Microservices.Infrastructure`) | `AddDatabaseLayer`, `IDBLayerDap.QueryListAsync`, `IDBLayerDap.SaveExceptionAsync` |
-| `Security` | `AddSecurityHardening`, `UseSecurityHardening`, `AddBankingCors` |
-| `Utilities` | Atributos de validación compartidos (`DateLesserThan`, `DateGreaterThan`) |
-| `SecretsHandler_Net10.0.dll` en `Libraries/SecretsHandler` | `RegisterSecretsHandler` |
-
-No dupliques conexión, cifrado de secretos, CORS bancario ni endurecimiento de Kestrel dentro del microservicio. Llamá a esas extensiones desde `Program.cs`.
+`AddSecurityHardening`, `AddBankingCors`, `RegisterSecretsHandler` y `AddDatabaseLayer` vienen de las librerías BNC. No reimplementar CORS, Kestrel, cifrado de secretos ni la conexión dentro del microservicio.
 
 ## Carpetas
 
 ```text
-Ms{Dominio}/
-  Program.cs                 composición: cultura, seguridad, secretos, DB, DI
-  RepositorySettings.cs      options del catálogo de procedures y queries
-  Controllers/               HTTP. Un controlador por recurso
-  Services/                  orquestación. Interfaz + clase en el mismo archivo
-  Repositories/              única capa que habla con IDBLayerDap
-  Models/                    requests HTTP y DTOs de salida
-  appsettings.json           connection names vacíos + mapa de procedures
-  appsettings.Development.json
-  Properties/launchSettings.json
-  Dockerfile
+msAuth/
+  nuget.config
+  Packages/              nupkg locales de BNC
+  Scripts.txt            esquema [Auth] y procedures; se corre a mano
+  MsAuth.slnx
+  MsAuth/                API
+    Program.cs
+    RepositorySettings.cs
+    JwtSettings.cs
+    Controllers/         MaintenanceController + un controlador por recurso
+    Services/AuthService.cs
+    Repositories/AuthRepository.cs
+    Models/              requests en MsAuth.Models; DTOs en BNC.Microservices.Auth.Models
+  MsAuthAdmin.slnx
+  MsAuthAdmin/           panel
+    Program.cs
+    Models/ApiModels.cs
+    Services/            AuthApiClient, AdminSession, AdminAuthorizeFilter
+    Pages/               Login, Users, Services, Endpoints, Permissions, Roles
 ```
 
-## Flujo de una operación
+Namespaces del API: host y controladores `BNC.Microservices.MsAuth`; negocio `BNC.Microservices.Auth.Services`; datos `BNC.Microservices.Auth.Repositories`; DTOs `BNC.Microservices.Auth.Models`; requests `MsAuth.Models`. El panel vive en `MsAuthAdmin` y `MsAuthAdmin.Pages`.
+
+## API
 
 ```text
-HTTP GET api/{Recurso}/{Accion}?query
-  -> Controller valida el request por DataAnnotations
-  -> I{Dominio}Service
-  -> I{Dominio}Repository
-  -> IDBLayerDap.QueryListAsync<TDto>(nombreSp, DynamicParameters, connectionName)
-  -> 200 OK con el DTO
+HTTP
+ -> Controller (DataAnnotations; mantenimiento vía MaintenanceController.ExecuteAsync)
+ -> IAuthService
+ -> IAuthRepository
+ -> IDBLayerDap.QueryListAsync<T>(procedure de config, DynamicParameters, "BNCAuth")
 ```
 
-El controlador no arma SQL ni parámetros de Dapper. El servicio no abre conexiones. El repositorio no devuelve `IActionResult`.
+El controlador no arma SQL ni `DynamicParameters`. El servicio no abre conexiones. El repositorio no devuelve `IActionResult`. Un solo `IAuthRepository` / `IAuthService`, ambos `Scoped`. No registrar como `Singleton` nada que reciba `IDBLayerDap`.
 
-Varios controladores pueden compartir el mismo servicio y el mismo repositorio cuando operan sobre el mismo agregado. En este servicio, `CardsController` y `MovementsController` usan `ICardsService` / `ICardsRepository`. Un recurso nuevo (`Balances`) tiene su controlador propio aunque todavía no tenga acciones.
+`Program.Main`, en este orden: cultura invariante, `AddSecurityHardening`, `AddBankingCors(..., "BNCCorsPolicy")`, `/run/secrets` si existe, `RegisterSecretsHandler`, `AddDatabaseLayer`, un `Dictionary<string, object>` singleton con `ConnectionStrings`, `AddScoped<IDBLayerDap, DBLayerDap>`, los dos servicios de negocio, `RepositorySettings` y `JwtSettings`, health, controllers, OpenAPI. Pipeline: `UseSecurityHardening`, en Development `MapOpenApi` y `MapScalarApiReference`, HTTPS, CORS, `UseAuthorization`, `GET /health`, controllers. No hay `AddAuthentication`: el Bearer lo valida `AuthService`.
 
-## `Program.cs`
+`MaintenanceController.ExecuteAsync`:
 
-Orden fijo:
+| `MaintenanceResult` | HTTP |
+|---|---|
+| `IsAuthorized == false` | 401 `{ Message = "Credenciales o permisos inválidos." }` |
+| `ResultCode` 0 | 200 con `Data` |
+| 1 | 404 con `Message` |
+| 2 | 409 con `Message` |
+| otro (3 inválido, 4 rol protegido) | 400 con `Message` |
+| excepción | `SaveExceptionAsync(ex, url, "{Servicio}.{Metodo}")` y 500 genérico, sin `ex.Message` |
 
-1. `WebApplication.CreateBuilder`.
-2. Cultura invariante.
-3. `AddSecurityHardening()` y `AddBankingCors(configuration, "BNCCorsPolicy")`. La política se lee de configuración; el nombre de la policy es `BNCCorsPolicy`.
-4. Si existe `/run/secrets`, `Configuration.AddKeyPerFile("/run/secrets", optional: true)`.
-5. `RegisterSecretsHandler(configuration)` para descifrar secretos.
-6. `AddDatabaseLayer(configuration)`.
-7. Negocio en `AddScoped`: `I{Dominio}Repository` y `I{Dominio}Service`.
-8. `Configure<RepositorySettings>(configuration.GetSection("RepositorySettings"))`.
-9. `AddHealthChecks()`, `AddControllers()`, `AddOpenApi()`.
-10. Pipeline: `UseSecurityHardening`, `MapOpenApi` solo en Development, `UseHttpsRedirection`, `UseCors("BNCCorsPolicy")`, `UseAuthorization`, `MapHealthChecks("/health")`, `MapControllers`.
+`PermissionsController.IssueToken` no usa `ExecuteAsync`: mismos 401 y 500, y 200 con `IssueTokenResponse`.
 
-Lifetime: servicio y repositorio son `Scoped`. No uses `Singleton` para nada que reciba `IDBLayerDap`.
-
-## Controladores
-
-- Namespace: `BNC.Microservices.Ms{Dominio}.Controllers`.
-- `[ApiController]`, `[Route("api/[controller]")]`, heredan `ControllerBase`.
-- Una acción por caso de uso. Verbo y ruta describen la consulta: `[HttpGet("ListById")]`, `[HttpGet("Last25")]`.
-- Entrada por query string: `[FromQuery] {Accion}Request model`. `[ApiController]` responde `400` si fallan las `DataAnnotations`; no hace falta un `if (!ModelState.IsValid)` manual.
-- Declarar `[ProducesResponseType]` para `200`, `400` y `500`.
-- Comentario XML `/// <summary>` en cada acción, en español, describiendo qué devuelve.
-- Inyectar el servicio de negocio y `IDBLayerDap`. Asignar ambos campos en el constructor. `IDBLayerDap` en el controlador solo se usa para registrar la excepción.
-- Cuerpo de la acción: `try` / `await` al servicio / `return Ok(resultado)`.
-- En el `catch (Exception ex)`:
-  - `await _dbLayer.SaveExceptionAsync(ex, HttpContext.Request.GetDisplayUrl(), "{Servicio}.{Metodo}");`
-  - el tercer argumento es el método que falló, no un nombre genérico reutilizado;
-  - responder `500` con un cuerpo anónimo y mensaje fijo: `new { Message = "Ocurrió un error interno procesando la solicitud." }`;
-  - no devolver `ex.Message`, stack trace ni detalle de base de datos.
-
-```csharp
-[HttpGet("ListById")]
-[ProducesResponseType(StatusCodes.Status200OK)]
-[ProducesResponseType(StatusCodes.Status400BadRequest)]
-[ProducesResponseType(StatusCodes.Status500InternalServerError)]
-public async Task<IActionResult> ListById([FromQuery] CardsListByIdRequest model)
-{
-    try
-    {
-        var cards = await _cardsService.GetCardsByCustomerAsync(model.DocType.ToUpper(), model.DocNumber);
-        return Ok(cards);
-    }
-    catch (Exception ex)
-    {
-        await _dbLayer.SaveExceptionAsync(ex, HttpContext.Request.GetDisplayUrl(), "CardsService.GetCardsByCustomerAsync");
-        return StatusCode(StatusCodes.Status500InternalServerError,
-            new { Message = "Ocurrió un error interno procesando la solicitud." });
-    }
-}
-```
-
-Normalizaciones mínimas de entrada (por ejemplo `DocType.ToUpper()`) pueden vivir en el controlador. Reglas de negocio no.
-
-## Servicios
-
-Archivo `Services/{Dominio}Service.cs`. Interfaz y clase en el mismo archivo. Namespace `BNC.Microservices.{Dominio}.Services`.
-
-- La interfaz expone un método por caso de uso, `Task<IEnumerable<TDto>>` (u otro DTO de `Models`).
-- La clase solo depende de `I{Dominio}Repository`.
-- Cada método delega al repositorio. Si más adelante hay regla de negocio, va aquí, nunca en el controlador ni en el repositorio.
-
-## Repositorios
-
-Archivo `Repositories/{Dominio}Repository.cs`. Interfaz y clase en el mismo archivo. Namespace `BNC.Microservices.{Dominio}.Repositories`.
-
-- Dependencias: `IDBLayerDap` y `IOptions<RepositorySettings>`.
-- Constante con el nombre lógico de la conexión. Tiene que coincidir con una clave de `ConnectionStrings` (en este servicio, `BNCTREOInterface`).
-- Por método:
-  1. `DynamicParameters` con tipo explícito (`DbType.AnsiString`, `DbType.Int32`, `DbType.Decimal`, `DbType.Date`). Si el procedure fija largo, pasar `size`.
-  2. Nombre del procedure desde `_repSettings.{Conexion}.StoredProcedures["ClaveLogica"]`. Prohibido hardcodear `[Schema].[Procedure]` en C#.
-  3. `await _dbLayer.QueryListAsync<TDto>(sp, parameters, ConnectionName)`.
-  4. Si `!response.IsSuccess`, lanzar `ApplicationException` con `response.Message`. El controlador la convierte en `500` genérico y la persiste.
-  5. Devolver `response.Content`.
-
-```csharp
-public async Task<IEnumerable<CardSummaryDto>> GetCardsByCustomerIdAsync(string docType, int docNumber)
-{
-    var parameters = new DynamicParameters();
-    parameters.Add("@DocType", docType, DbType.AnsiString, size: 1);
-    parameters.Add("@DocNumber", docNumber, DbType.Int32);
-
-    var response = await _dbLayer.QueryListAsync<CardSummaryDto>(
-        _repSettings.BNCTREOInterface.StoredProcedures["CardsListById"],
-        parameters,
-        ConnectionName);
-
-    if (!response.IsSuccess)
-        throw new ApplicationException($"Error de base de datos al consultar tarjetas: {response.Message}");
-
-    return response.Content;
-}
-```
-
-El DTO genérico de `QueryListAsync<T>` se mapea por nombre de columna del procedure a las propiedades del record. No hay mapper manual.
-
-## Modelos
-
-Dos tipos, ambos bajo `Models/`:
-
-| Tipo | Namespace | Forma | Responsabilidad |
-|---|---|---|---|
-| Request | el del host, junto al controlador que lo bindea | `class` | Contrato de entrada HTTP. Solo DataAnnotations |
-| DTO | `BNC.Microservices.{Dominio}.Models` | `record` con propiedades `set` | Contrato de salida y mapeo del result set |
-
-Requests:
-
-- Una clase por acción: `{Accion}Request`.
-- `[Required]`, `[Range]`, `[StringLength]`, `[RegularExpression]` con `ErrorMessage` en español.
-- Comparación de fechas con los atributos de `Utilities` (`DateLesserThan`, `DateGreaterThan`), no con lógica en el controlador.
-- Tipos alineados al procedure: documento como `string` de 1 carácter + `int`; número de tarjeta como `decimal` (no `string`, no `long`).
-
-DTOs:
-
-- Nombres de propiedades iguales a las columnas que devuelve el procedure.
-- Sin atributos de validación y sin lógica.
-
-## Configuración
-
-`appsettings.json` deja las conexiones vacías y publica el catálogo de procedures. Los valores reales van a `appsettings.Development.json`, user-secrets o `/run/secrets`. No commitear passwords, usuarios ni servidores en el lineamiento ni en archivos de ejemplo.
-
-```json
-{
-  "ConnectionStrings": {
-    "BNCTREOInterface": "",
-    "ExceptionDB": ""
-  },
-  "RepositorySettings": {
-    "BNCTREOInterface": {
-      "StoredProcedures": {
-        "CardsListById": "[Cards].[p_API_CardsByID_Get]",
-        "GetMovementsLast25": "[Movements].[p_API_CardAuthorizationsLast25_Get]",
-        "GetMovementsByDate": "[Movements].[p_API_CardAuthorizationsByDate_Get]"
-      }
-    }
-  }
-}
-```
-
-`RepositorySettings` es la clase de options:
-
-- Una propiedad por base (`BNCTREOInterface`, `Corebanking`, …).
-- Cada base de procedures expone `Dictionary<string, string> StoredProcedures`.
-- La clave del diccionario es el nombre lógico que usa el repositorio. El valor es `[Schema].[p_API_...]`.
-- `ExceptionDB` es la conexión que usa `SaveExceptionAsync`; no se consulta desde los repositorios de negocio.
-- Si el servicio también pega a core bancario, la sección `Corebanking` lleva `Schema` y `Queries`, separada de los stored procedures.
-
-Al agregar un endpoint nuevo: procedure en el diccionario, método en la interfaz del repositorio, método en el servicio, acción en el controlador, request y DTO. En ese orden.
-
-## Errores y respuestas
-
-| Situación | Quién la produce | HTTP |
+| Verbo y ruta | Body / query | Qué hace |
 |---|---|---|
-| Request inválido | `[ApiController]` + DataAnnotations | 400, mensaje del atributo |
-| Fallo de `IDBLayerDap` (`IsSuccess == false`) | repositorio lanza `ApplicationException` | 500 genérico, excepción persistida |
-| Cualquier otra excepción | `catch` del controlador | 500 genérico, excepción persistida |
-| Consulta vacía | el procedure devuelve lista vacía | 200 con `[]` |
+| `POST api/Permissions/IssueToken` | `UidUser`, `ApiKey`, `IdService` | Emite el JWT. No exige Administrator |
+| `POST api/Users/Create` | `Name`, `ApiKey` | El GUID lo genera el procedure |
+| `POST api/Users/Update` | `IdUser`, `Name`, `IsActive`, `ApiKey?` | `ApiKey` vacía conserva el hash |
+| `GET api/Users/List` | — | Sin API key |
+| `POST api/Users/Delete` | `IdUser` | Borra el usuario, sus permisos, sus roles y sus tokens |
+| `POST api/Services/Create` | `Name` | |
+| `POST api/Services/Update` | `IdService`, `Name`, `IsActive` | |
+| `GET api/Services/List` | — | |
+| `POST api/Endpoints/Create` | `IdService`, `Name`, `HttpMethod`, `Route` | |
+| `POST api/Endpoints/Update` | `IdEndpoint`, `Name`, `HttpMethod`, `Route`, `IsActive` | |
+| `GET api/Endpoints/ListByService` | `IdService` | |
+| `POST api/Permissions/Create` | `IdUser`, `IdService`, `IdEndpoint` | Si ya existe, el procedure lo reactiva |
+| `POST api/Permissions/Update` | `IdPermission`, `IsActive` | |
+| `GET api/Permissions/ListByUser` | `IdUser` | |
+| `POST api/Roles/Create` | `Name` | |
+| `POST api/Roles/Update` | `IdRole`, `Name`, `IsActive` | |
+| `GET api/Roles/List` | — | |
+| `POST api/Roles/Assign` | `IdUser`, `IdRole` | Si ya existe, la reactiva |
+| `POST api/Roles/UpdateAssignment` | `IdUserRole`, `IsActive` | |
+| `GET api/Roles/ListByUser` | `IdUser` | |
 
-## Docker y ejecución local
+No hay `GetById`. El panel lista y filtra.
 
-- Multi-stage: `base` (aspnet, `USER $APP_UID`, `EXPOSE 8080` y `8081`), `build` (restore del csproj y de los proyectos hermanos), `publish` con `/p:UseAppHost=false`, `final` con `ENTRYPOINT ["dotnet", "Ms{Dominio}.dll"]`.
-- Perfiles en `launchSettings.json`: `http`, `https`, `Container (Dockerfile)` e `IIS Express`. Development setea `ASPNETCORE_ENVIRONMENT=Development`.
-- Health check público: `GET /health`.
-- OpenAPI solo en Development (`MapOpenApi`).
+Requests en `MsAuth.Models`, solo DataAnnotations, mensajes en español. Nombres con largo máximo y sin quedar en blanco. Ids con `[Range(1, int.MaxValue)]`. `IsActive` es `bool?` con `[Required]`. `HttpMethod` acepta `*` (todos los verbos), `GET`, `POST`, `PUT`, `PATCH` y `DELETE`. `Route` puede ser un controlador (`CreditCards`), un controlador y acción (`Cards/ListAvailableCards`) o una ruta que empiece con `/`, hasta 300 caracteres. `IssueTokenRequest` rechaza `Guid.Empty`.
+
+### Emisión del token
+
+1. `GetUserPermissions`. Sin filas, o `ResultCode` distinto de 0 y de 3, o ids vacíos: 401.
+2. Códigos de ese procedure: `0` con endpoints, `1` usuario o API key inválidos, `2` servicio inexistente o inactivo, `3` usuario y servicio válidos pero sin endpoints.
+3. Endpoints solo con código 0, `IdEndpoint > 0` y método y ruta. Roles activos con `GetUserRoles`.
+4. Sin endpoints y sin roles: 401. Con código 3 y al menos un rol, el JWT sale sin claims `endpoint`.
+5. HMAC-SHA256. `LifetimeHours` de config, o 24 si viene en 0. `SigningKey` de al menos 32 caracteres.
+6. Claims: `sub` = `UidUser`, `jti`, `serviceId`, un `role` por rol, un `endpoint` con el texto `{HttpMethod} {Route}`. Issuer `BNC.MsAuth`, audience `BNC.Microservices`.
+7. `SaveAccessToken`. La respuesta trae `Token`, `Bearer` y `DtExpires` de la fila guardada.
+
+El mantenimiento pasa por `Gate`: Bearer con o sin prefijo, issuer, audience, firma y lifetime (`ClockSkew` de 1 minuto, `MapInboundClaims = false`). Hace falta el claim `role` = `Administrator`.
+
+`FromRow`: 0 devuelve la fila; 1 no existe; 2 duplicado; 4 el rol Administrator no se renombra ni se desactiva; otro usa el mensaje del caller o "La solicitud no es válida para el mantenimiento." Si el procedure no devuelve fila, `ApplicationException`. `ResultCode` de los DTO tiene `[JsonIgnore]`.
+
+### Datos
+
+Conexión lógica `BNCAuth`. Procedures desde `_repSettings.BNCAuth.StoredProcedures`, nunca hardcodeados. `ExceptionDB` solo la usa `SaveExceptionAsync`.
+
+`Scripts.txt` define el esquema `[Auth]`: `User` (`uidUser`, `apiKeyHash`), `Service`, `Endpoint` único por `(idService, httpMethod, route)`, `Permission` único por `(idUser, idEndpoint)`, `AccessToken` (este código no revoca), `Role` (siembra `Administrator`) y `UserRole`. Un permiso cuyo endpoint no pertenece al servicio, o un rol inactivo al asignar, devuelve código 3.
+
+Catálogo en `appsettings.json`: `GetUserPermissions`, `GetUserRoles`, `SaveAccessToken`, `InsertUser`, `UpdateUser`, `ListUsers`, `InsertService`, `UpdateService`, `ListServices`, `InsertEndpoint`, `UpdateEndpoint`, `ListEndpointsByService`, `InsertPermission`, `UpdatePermission`, `ListPermissionsByUser`, `InsertRole`, `UpdateRole`, `ListRoles`, `AssignUserRole`, `UpdateUserRole`, `ListUserRolesByUser`.
+
+`appsettings.json` deja `BNCAuth`, `ExceptionDB` y `Jwt:SigningKey` vacíos. Los valores reales van a user-secrets, `appsettings.Development.json` local o `/run/secrets`. No commitear passwords, servidores ni la clave de firma. Perfiles del API: `http://localhost:5090`, `https://localhost:7090`, IIS Express SSL `44360`.
+
+Para una operación nueva: procedure en `Scripts.txt` y en el catálogo, método en el repositorio, método en el servicio (`Gate` si es mantenimiento), request y DTO, acción con `ExecuteAsync`.
+
+## Panel
+
+`AuthApi:BaseUrl` y `AuthApi:ServiceId` salen de configuración. En Development de este repo la base es `http://localhost:5090/` (el perfil http del API de acá) y el servicio es `1`. `HttpClient<AuthApiClient>` usa esa base, camelCase y timeout de 30 segundos. `ApiCall<T>` carga `Message`, después `errors`, después `title`. Status 0 es fallo de conexión o de configuración.
+
+La sesión es la cookie `.MsAuthAdmin` (`HttpOnly`, `Lax`, esencial, idle de 12 horas) con `msauth.token`, `msauth.expires` y `msauth.user`. `AdminAuthorizeFilter` deja pasar solo `/Login`, `/Logout` y `/Error`. Un 401 del API cierra la sesión y vuelve a `/Login`. Logout es POST. El alta de usuarios tiene el botón Generar, que arma 32 caracteres con `crypto.getRandomValues` y los muestra para copiarlos.
+
+| Ruta | Llamadas |
+|---|---|
+| `/Login` | `POST api/Permissions/IssueToken` |
+| `/Users` y `/Users/Edit/{id}` | `api/Users/List`, `Create`, `Update` |
+| `/Services` y `/Services/Edit/{id}` | `api/Services/List`, `Create`, `Update` |
+| `/Endpoints` | `api/Services/List`, `api/Endpoints/ListByService`, `Create`, `Update` |
+| `/Permissions` | listas de usuarios, servicios y endpoints, `api/Permissions/ListByUser`, `Create`, `Update` |
+| `/Roles` | `api/Roles/List`, `api/Users/List`, `api/Roles/ListByUser`, `Create`, `Update`, `Assign`, `UpdateAssignment` |
+
+Editar vuelve a pedir el listado y busca el id. Alertas: `TempData["Notice"]`, `ViewData["Error"]`, `TempData["Error"]`. Perfiles del panel: `http://localhost:5109`, `https://localhost:7227`, IIS Express SSL `44366`.
+
+Una pantalla nueva hereda `AdminPageModel`, llama al cliente con `Token`, pasa por `RedirectIfUnauthorized` y se enlaza en `_Layout` y en el inicio.
 
 ## Qué no hacer
 
-- No poner `DynamicParameters`, nombres de procedures ni connection strings dentro de controladores o servicios.
-- No devolver el detalle de la excepción al cliente.
-- No registrar servicio o repositorio como `Singleton`.
-- No crear un repositorio por acción. Un repositorio por agregado; los controladores del mismo agregado lo comparten.
-- No mapear columnas a mano si el nombre de la propiedad del DTO ya coincide con la columna.
-- No inventar una segunda vía de acceso a datos (ADO.NET suelto, EF, HTTP a la base). Toda lectura nueva entra por `IDBLayerDap`.
+- No poner `DynamicParameters`, nombres de procedures ni connection strings en controladores o servicios.
+- No devolver el detalle de una excepción al cliente ni loguear la API key.
+- No abrir SQL desde el panel, ni guardar el token fuera de la sesión.
+- No saltear `AdminAuthorizeFilter`. No tratar un 401 como error de formulario.
+- No duplicar en el panel las reglas del API (rol Administrator, hash, rol protegido, unicidad).
+- No hardcodear la URL del API. Sale de `AuthApi:BaseUrl`.
+- El `Dockerfile` del API todavía copia proyectos hermanos (`DBLayerDap`, `Security`, `Utilities`) bajo `msAuth/`. El csproj ya usa los paquetes de `Packages/`. Si se toca la imagen, alinear el Dockerfile con el csproj.

@@ -18,6 +18,8 @@ namespace BNC.Microservices.Auth.Services
 
         Task<MaintenanceResult<IReadOnlyList<UserDto>>> ListUsersAsync(string? authorization);
 
+        Task<MaintenanceResult<UserDto>> DeleteUserAsync(string? authorization, int idUser);
+
         Task<MaintenanceResult<ServiceDto>> CreateServiceAsync(string? authorization, string name);
 
         Task<MaintenanceResult<ServiceDto>> UpdateServiceAsync(string? authorization, int idService, string name, bool isActive);
@@ -164,6 +166,17 @@ namespace BNC.Microservices.Auth.Services
             }
 
             return Succeeded((IReadOnlyList<UserDto>)(await _authRepository.ListUsersAsync()).ToList());
+        }
+
+        public async Task<MaintenanceResult<UserDto>> DeleteUserAsync(string? authorization, int idUser)
+        {
+            var denied = Gate<UserDto>(authorization);
+            if (denied is not null)
+            {
+                return denied;
+            }
+
+            return FromRow(await _authRepository.DeleteUserAsync(idUser));
         }
 
         public async Task<MaintenanceResult<ServiceDto>> CreateServiceAsync(string? authorization, string name)
@@ -493,7 +506,8 @@ namespace BNC.Microservices.Auth.Services
 
         private static string NormalizeMethod(string httpMethod)
         {
-            return httpMethod.Trim().ToUpperInvariant();
+            var method = httpMethod.Trim();
+            return method == "*" ? method : method.ToUpperInvariant();
         }
 
         private static DateTime TruncateToSeconds(DateTime value)

@@ -17,7 +17,10 @@
             </div>
             <div class="col-md-4">
                 <label class="form-label" for="apiKey">API key</label>
-                <input class="form-control" id="apiKey" name="apiKey" type="password" maxlength="256" required autocomplete="new-password" />
+                <div class="input-group">
+                    <input class="form-control" id="apiKey" name="apiKey" type="password" maxlength="256" required autocomplete="new-password" />
+                    <button class="btn btn-outline-secondary" type="button" id="btnGenerateKey">Generar</button>
+                </div>
             </div>
             <div class="col-md-2 d-flex align-items-end">
                 <button class="btn btn-primary" type="submit">Crear</button>
@@ -47,9 +50,36 @@
                 <td>@user.Name</td>
                 <td><span class="status @(user.IsActive ? "status-on" : "status-off")">@(user.IsActive ? "Activo" : "Inactivo")</span></td>
                 <td>@user.DtCreated.ToString("yyyy-MM-dd HH:mm")</td>
-                <td><a asp-page="Edit" asp-route-id="@user.IdUser">Modificar</a></td>
+                <td class="text-nowrap">
+                    <a asp-page="Edit" asp-route-id="@user.IdUser">Modificar</a>
+                    <form method="post" asp-page-handler="Delete" class="d-inline" onsubmit="return confirm('¿Eliminar este usuario y sus permisos?');">
+                        <input type="hidden" name="idUser" value="@user.IdUser" />
+                        <button class="btn btn-sm btn-outline-danger ms-2" type="submit">Eliminar</button>
+                    </form>
+                </td>
             </tr>
         }
         </tbody>
     </table>
 </div>
+
+@section Scripts {
+    <script>
+        document.getElementById('btnGenerateKey').addEventListener('click', function () {
+            const length = 32;
+            const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+            let key = "";
+
+            const randomValues = new Uint32Array(length);
+            window.crypto.getRandomValues(randomValues);
+
+            for (let i = 0; i < length; i++) {
+                key += charset[randomValues[i] % charset.length];
+            }
+
+            const apiKeyInput = document.getElementById('apiKey');
+            apiKeyInput.value = key;
+            apiKeyInput.type = "text";
+        });
+    </script>
+}
